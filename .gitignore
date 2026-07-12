@@ -1,0 +1,22 @@
+# .NET build output
+bin/
+obj/
+.vs/
+*.user
+
+# Local pack output (`node devtools/dev.mjs pack` → dist/<asset>)
+dist/
+
+# ONNX models are FETCHED by CI (from the manifest's model.url + verified sha256) — not committed.
+**/Models/*.onnx
+
+# Private / machine-local scratch — backups, probes, secrets, a local model copy, throwaway archives.
+# Nothing here is ever tracked or pushed. See .claude/rules/sensitive-info.md.
+local/
+
+# Local overrides
+.claude/settings.local.json
+.env*.local
+
+# NOTE: lib/ IS tracked — it holds the vendored plugin SDK dlls (D3dxSkinManager.Core.dll +
+# D3dxSkinManager.Plugin.Sdk.dll), published from the main app via `node devtools/dev.mjs plugin-sdk`.

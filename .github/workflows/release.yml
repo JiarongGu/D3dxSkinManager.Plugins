@@ -1,0 +1,102 @@
+name: Release plugins
+
+# Cut a plugin release: build/carry every official pack from plugins.manifest.json, then publish the pack
+# zips + a public plugins-manifest.json the app reads (from THIS repo's releases) to list/update plugins.
+# Plugin versions are INDEPENDENT of the app. Tag with e.g. `v1.1` (or run manually).
+on:
+  push:
+    tags: ["v*", "plugin-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. v1.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Resolve tag
+        id: tag
+        shell: pwsh
+        run: |
+          $t = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.tag }}" } else { "${{ github.ref_name }}" }
+          "tag=$t" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Release tag: $t"
+
+      - name: Build plugin packs (manifest-driven)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $manifest = Get-Content plugins.manifest.json -Raw | ConvertFrom-Json
+          $releaseDir = "release"
+          New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+
+          # Previous published release's manifest → per-plugin version + tag (to detect unchanged packs).
+          # Best-effort: any failure (no prior release / no manifest asset) builds everything.
+          $prev = @{}
+          try {
+            $prevJson = gh api "repos/${{ github.repository }}/releases/latest" | ConvertFrom-Json
+            $prevAsset = $prevJson.assets | Where-Object { $_.name -eq "plugins-manifest.json" } | Select-Object -First 1
+            if ($prevAsset) {
+              $tmp = New-TemporaryFile
+              Invoke-WebRequest -Uri $prevAsset.browser_download_url -OutFile $tmp
+              $prevManifest = Get-Content $tmp -Raw | ConvertFrom-Json
+              foreach ($p in $prevManifest.plugins) { $prev[$p.id] = @{ version = "$($p.version)"; tag = $prevJson.tag_name } }
+              Write-Host "Previous plugin manifest from $($prevJson.tag_name): $($prev.Keys -join ', ')"
+            }
+          } catch { Write-Host "No previous plugin manifest — building all packs" }
+
+          $public = @()
+          foreach ($p in $manifest.plugins) {
+            $prevEntry = $prev[$p.id]
+            $unchanged = $prevEntry -and ($prevEntry.version -eq "$($p.version)")
+
+            if ($unchanged) {
+              Write-Host "Plugin $($p.id) v$($p.version) unchanged — carrying built asset from $($prevEntry.tag)"
+              gh release download $prevEntry.tag -R "${{ github.repository }}" -p $p.asset -D $releaseDir --clobber
+              if (-not (Test-Path "$releaseDir/$($p.asset)")) {
+                Write-Host "::warning::carry-forward failed for $($p.id) — building fresh"
+                $unchanged = $false
+              }
+            }
+
+            if (-not $unchanged) {
+              Write-Host "Building plugin $($p.id) v$($p.version)"
+              New-Item -ItemType Directory -Force (Split-Path $p.model.dest) | Out-Null
+              Invoke-WebRequest -Uri $p.model.url -OutFile $p.model.dest
+              $hash = (Get-FileHash $p.model.dest -Algorithm SHA256).Hash.ToLower()
+              if ($hash -ne $p.model.sha256) { Write-Host "::error::model sha256 mismatch for $($p.id): $hash"; exit 1 }
+              dotnet build $p.project -c Release --nologo
+              Compress-Archive -Path $p.dll -DestinationPath "$releaseDir/$($p.asset)" -Force
+            }
+
+            Write-Host "pack $($p.asset): $([math]::Round((Get-Item "$releaseDir/$($p.asset)").Length / 1MB, 1)) MB"
+            $public += [ordered]@{ id = $p.id; name = $p.name; description = $p.description; version = "$($p.version)"; asset = $p.asset; sdkContractVersion = "$($p.sdkContractVersion)" }
+          }
+
+          # The public manifest attached to THIS release (what the app reads to list/update plugins).
+          @{ plugins = $public } | ConvertTo-Json -Depth 5 | Out-File "$releaseDir/plugins-manifest.json" -Encoding utf8
+          Write-Host "Wrote plugins-manifest.json with $($public.Count) pack(s)"
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.tag.outputs.tag }}"
+          if (-not (gh release view $tag -R "${{ github.repository }}" 2>$null)) {
+            gh release create $tag -R "${{ github.repository }}" --title "Plugins $tag" --notes "Official plugin packs. Installed/updated in-app (Settings → 插件)."
+          }
+          Get-ChildItem release/* | ForEach-Object { gh release upload $tag $_.FullName -R "${{ github.repository }}" --clobber }

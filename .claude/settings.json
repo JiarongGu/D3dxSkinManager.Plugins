@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node devtools/dev.mjs:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet test:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git rm:*)",
+      "Skill(caveman)",
+      "Skill(caveman:*)",
+      "Skill(plugin-new)",
+      "Skill(plugin-new:*)"
+    ],
+    "additionalDirectories": [
+      ".claude",
+      ".claude/rules",
+      ".claude/skills"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[GATE] Before coding: scan .claude/rules/RULES_INDEX.md -> Read every matched rule. PUBLIC repo — no machine paths / private names / NSFW in tracked files (sensitive-info.md). New plugin? /plugin-new + the single-DLL + Private=false + 3-way-version-sync contract (CLAUDE.md, lib/README.md).'"
+          }
+        ]
+      }
+    ]
+  }
+}
