@@ -43,8 +43,9 @@ Full contract: **`lib/README.md`**. Reference implementation: **`D3dxSkinManager
 5. **3-way version sync** — on ANY pack change bump ALL of: manifest `version`, `IPlugin.Version`,
    csproj `<Version>`. Out of sync → the release ships the wrong or a no-op zip.
 
-6. **Build + local pack**: `node devtools/dev.mjs pack <id>` → `dist/<asset>` to install-test in the app
-   (`{profile}/plugins/`). Release: push a `v*` tag (CI builds/carries packs + the public manifest).
+6. **Build + test**: `node devtools/dev.mjs install <id> <pluginsDir>` drops the single self-contained dll
+   into `{profile}/plugins/<id>/` for a LIVE test (or `pack <id>` → `dist/<asset>` release zip). Release:
+   push a `v*` tag (CI builds/carries packs + the public manifest).
 
 ## Rules
 - Single-DLL packs only — embed everything (see CLAUDE.md).

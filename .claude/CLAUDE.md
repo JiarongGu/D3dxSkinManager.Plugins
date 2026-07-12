@@ -29,7 +29,9 @@
 ## Dev loop
 
 - `node devtools/dev.mjs build` — build every pack (Release).
-- `node devtools/dev.mjs pack [id]` — build + zip pack dll(s) into `dist/` for a local install test.
+- `node devtools/dev.mjs pack [id]` — build + zip the single-dll pack into `dist/<asset>` (release format).
+- `node devtools/dev.mjs install [id] [pluginsDir]` — build + drop the SINGLE self-contained dll into
+  `<pluginsDir>/<id>/` for a LIVE app test (no dir → `dist/install/`; copy into `{profile}/plugins/`, restart).
 - Release: push a `v*` tag (or run the workflow) → builds/carries packs + publishes `plugins-manifest.json`.
 
 ## Layout
