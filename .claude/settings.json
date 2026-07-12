@@ -13,7 +13,9 @@
       "Skill(caveman)",
       "Skill(caveman:*)",
       "Skill(plugin-new)",
-      "Skill(plugin-new:*)"
+      "Skill(plugin-new:*)",
+      "Skill(plugin-bump)",
+      "Skill(plugin-bump:*)"
     ],
     "additionalDirectories": [
       ".claude",

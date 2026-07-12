@@ -1,21 +1,30 @@
 name: Release plugins
 
-# Cut a plugin release: build/carry every official pack from plugins.manifest.json, then publish the pack
-# zips + a public plugins-manifest.json the app reads (from THIS repo's releases) to list/update plugins.
-# Plugin versions are INDEPENDENT of the app. Tag with e.g. `v1.1` (or run manually).
+# Cut a plugin release. TWO version tiers:
+#   • releaseVersion (plugins.manifest.json) — the REPO release version. This workflow bumps it
+#     (workflow_dispatch: version/bump, like the app), commits it, and tags vX.Y.
+#   • each plugin's `version` — bumped by the dev (node devtools/dev.mjs bump <id>) when the plugin
+#     changes; the build carries an unchanged pack forward and rebuilds a changed one.
+# Publishes the pack zips + a public plugins-manifest.json (carrying releaseVersion + every pack) that
+# the app reads from THIS repo's releases to list/update plugins.
 on:
-  push:
-    tags: ["v*", "plugin-v*"]
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag to create (e.g. v1.1)"
-        required: true
+      version:
+        description: "Release version (e.g. 1.2) — leave empty to bump releaseVersion"
+        required: false
+      bump:
+        description: "Bump type when no explicit version"
+        type: choice
+        options: [minor, major, none]
+        default: minor
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: write
 
-# Serialize releases per ref so two tag pushes can't race on the carry-forward / latest-release logic.
+# Serialize releases per ref so two runs can't race on the carry-forward / latest-release logic.
 concurrency:
   group: plugins-release-${{ github.ref }}
   cancel-in-progress: false
@@ -25,19 +34,61 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags for the version bump commit + release-note diffing
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
 
-      - name: Resolve tag
-        id: tag
+      # Mirrors the app's "Determine version": read the current releaseVersion, apply the explicit
+      # input or a MAJOR.MINOR bump, persist it into the manifest, commit + push, and emit version/tag.
+      - name: Determine release version
+        id: version
         shell: pwsh
         run: |
-          $t = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.tag }}" } else { "${{ github.ref_name }}" }
-          "tag=$t" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Release tag: $t"
+          $manifestPath = "plugins.manifest.json"
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $current = "$($manifest.releaseVersion)"
+          Write-Host "Current releaseVersion: $current"
+
+          if ("${{ github.event_name }}" -eq "push") {
+            # Triggered by a pushed tag — the tag IS the release version (no bump, no commit).
+            $final = ("${{ github.ref_name }}") -replace '^v', ''
+            Write-Host "Tag push -> release version $final"
+          } else {
+            # workflow_dispatch: explicit `version` wins; else bump releaseVersion (default minor).
+            $final = $current
+            if ("${{ inputs.version }}" -ne "") {
+              $final = "${{ inputs.version }}"
+              Write-Host "Explicit version: $final"
+            } elseif ("${{ inputs.bump }}" -ne "none") {
+              if ($current -match '^(\d+)\.(\d+)$') {
+                $maj = [int]$matches[1]; $min = [int]$matches[2]
+                switch ("${{ inputs.bump }}") { "major" { $maj++; $min = 0 } "minor" { $min++ } }
+                $final = "$maj.$min"
+                Write-Host "Bumped ${{ inputs.bump }}: $current -> $final"
+              } else { Write-Host "::error::bad releaseVersion '$current' (want X.Y)"; exit 1 }
+            }
+
+            # Persist the bumped releaseVersion into the manifest (targeted replace — no reserialize) + commit.
+            if ($final -ne $current) {
+              $raw = Get-Content $manifestPath -Raw
+              $raw = [regex]::Replace($raw, '("releaseVersion"\s*:\s*")[^"]*(")', { param($m) $m.Groups[1].Value + $final + $m.Groups[2].Value })
+              Set-Content $manifestPath -Value $raw -NoNewline -Encoding utf8
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git add $manifestPath
+              git commit -m "chore(release): releaseVersion -> $final"
+              git push
+            }
+          }
+
+          if ($final -notmatch '^\d+\.\d+$') { Write-Host "::error::release version '$final' is not X.Y"; exit 1 }
+          "version=$final" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=v$final"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Release version: $final (tag v$final)"
 
       - name: Build plugin packs (manifest-driven)
         shell: pwsh
@@ -91,17 +142,63 @@ jobs:
             $public += [ordered]@{ id = $p.id; name = $p.name; description = $p.description; version = "$($p.version)"; asset = $p.asset; sdkContractVersion = "$($p.sdkContractVersion)" }
           }
 
-          # The public manifest attached to THIS release (what the app reads to list/update plugins).
-          @{ plugins = $public } | ConvertTo-Json -Depth 5 | Out-File "$releaseDir/plugins-manifest.json" -Encoding utf8
-          Write-Host "Wrote plugins-manifest.json with $($public.Count) pack(s)"
+          # The public manifest attached to THIS release (what the app reads). Carries the REPO
+          # releaseVersion + every pack (id/name/description/version/asset/sdkContractVersion).
+          [ordered]@{ releaseVersion = "${{ steps.version.outputs.version }}"; plugins = $public } | ConvertTo-Json -Depth 5 | Out-File "$releaseDir/plugins-manifest.json" -Encoding utf8
+          Write-Host "Wrote plugins-manifest.json (releaseVersion ${{ steps.version.outputs.version }}, $($public.Count) pack(s))"
+
+      # Release notes = commits since the previous vX.Y tag (numeric compare), grouped by type — the
+      # app's model. Plus a per-plugin version table so a reader sees which packs shipped at what version.
+      - name: Release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          function Parse($t) { if ($t -match '^v(\d+)\.(\d+)$') { return [version]"$($matches[1]).$($matches[2])" } }
+          $cur = Parse $tag
+          $prev = $null; $prevV = $null
+          foreach ($t in (git tag)) {
+            $v = Parse $t; if (-not $v) { continue }
+            if ($cur -and $v -ge $cur) { continue }          # skip the current tag + anything newer
+            if ($null -eq $prevV -or $v -gt $prevV) { $prevV = $v; $prev = $t }
+          }
+          $range = if ($prev) { "$prev..HEAD" } else { "HEAD" }
+          Write-Host "notes range: $range"
+          $subjects = @(git log $range --pretty=format:"%s" --no-merges)
+
+          $feat = @(); $fix = @(); $other = @()
+          foreach ($s in $subjects) {
+            if ($s -match '^chore\(release\)') { continue }  # drop the release-bump commit
+            elseif ($s -match '^feat') { $feat += $s }
+            elseif ($s -match '^fix') { $fix += $s }
+            else { $other += $s }
+          }
+
+          $manifest = Get-Content plugins.manifest.json -Raw | ConvertFrom-Json
+          $md = "## Plugins $tag`n`n| Plugin | Version |`n|---|---|`n"
+          foreach ($p in $manifest.plugins) { $md += "| $($p.name) | $($p.version) |`n" }
+          $md += "`n"
+          if ($feat)  { $md += "### Features`n"  + (($feat  | ForEach-Object { "- $_" }) -join "`n") + "`n`n" }
+          if ($fix)   { $md += "### Fixes`n"     + (($fix   | ForEach-Object { "- $_" }) -join "`n") + "`n`n" }
+          if ($other) { $md += "### Changes`n"   + (($other | ForEach-Object { "- $_" }) -join "`n") + "`n`n" }
+          $md += "Install / update in-app: Settings → Plugins."
+          $md | Out-File "release-notes.md" -Encoding utf8
+          Write-Host $md
 
       - name: Publish release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = "${{ steps.tag.outputs.tag }}"
-          if (-not (gh release view $tag -R "${{ github.repository }}" 2>$null)) {
-            gh release create $tag -R "${{ github.repository }}" --title "Plugins $tag" --notes "Official plugin packs. Installed/updated in-app (Settings → 插件)."
+          $tag = "${{ steps.version.outputs.tag }}"
+          # Create + push the tag if missing (workflow_dispatch path; on a tag push it already exists).
+          if (-not (git rev-parse -q --verify "refs/tags/$tag")) {
+            git tag $tag
+            git push origin $tag
+          }
+          if (gh release view $tag -R "${{ github.repository }}" 2>$null) {
+            gh release edit $tag -R "${{ github.repository }}" --notes-file release-notes.md
+          } else {
+            gh release create $tag -R "${{ github.repository }}" --title "Plugins $tag" --notes-file release-notes.md
           }
           Get-ChildItem release/* | ForEach-Object { gh release upload $tag $_.FullName -R "${{ github.repository }}" --clobber }

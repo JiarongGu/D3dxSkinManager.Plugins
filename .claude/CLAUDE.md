@@ -13,9 +13,11 @@
    the one plugin DLL and extracted to `IPluginContext.GetPluginDataPath(Id)` on first use. Host-provided
    packages (ImageSharp, …) → `Private=false` + `ExcludeAssets=runtime`. The release ships ONLY the plugin dll.
 
-3. **3-way version sync (or the release ships the wrong/no-op zip).** On any pack change bump ALL of:
-   `plugins.manifest.json` → `version`, the plugin's `IPlugin.Version`, and its csproj `<Version>`.
-   Also set `sdkContractVersion` in the manifest to `PluginSdk.ContractVersion` you built against.
+3. **Two version tiers (see `.claude/rules/plugin-versioning.md`).** (a) Each PLUGIN's version = manifest
+   `version` + csproj `<Version>` + `IPlugin.Version` (3-way — `node devtools/dev.mjs bump <id>` does all
+   three; a partial bump ships the wrong/no-op zip). Also set the manifest `sdkContractVersion` to the
+   `PluginSdk.ContractVersion` you built against. (b) The REPO `releaseVersion` is bumped by the release
+   workflow (`workflow_dispatch`), NOT by hand.
 
 4. **Models are fetched by CI**, not committed (`.gitignore` excludes `**/Models/*.onnx`). CI downloads
    from the manifest's `model.url` and verifies `model.sha256`. Keep a local copy to build locally.
@@ -32,7 +34,10 @@
 - `node devtools/dev.mjs pack [id]` — build + zip the single-dll pack into `dist/<asset>` (release format).
 - `node devtools/dev.mjs install [id] [pluginsDir]` — build + drop the SINGLE self-contained dll into
   `<pluginsDir>/<id>/` for a LIVE app test (no dir → `dist/install/`; copy into `{profile}/plugins/`, restart).
-- Release: push a `v*` tag (or run the workflow) → builds/carries packs + publishes `plugins-manifest.json`.
+- `node devtools/dev.mjs bump <id> [major|minor]` — bump a PLUGIN's version (3-way sync). Run
+  `hooks install` once to enable the pre-commit guard that warns on a plugin change without a bump.
+- Release: Actions → **Release plugins** → Run workflow (`bump`/`version`) → bumps `releaseVersion`, tags
+  `vX.Y`, builds/carries packs, publishes `plugins-manifest.json`. Or push a `vX.Y` tag directly.
 
 ## Layout
 
@@ -43,10 +48,11 @@
 ## Rules & skills
 
 - **Rules** → scan `.claude/rules/RULES_INDEX.md` before a task, `Read` matched files.
-  `sensitive-info.md` = PUBLIC-repo safety (no machine paths / private names / NSFW in tracked files);
-  `scripts-live-in-repo.md` = tooling in `devtools/`, private scratch/models in git-ignored `local/`.
-- **Skills** → `/plugin-new <Name> [capability]` scaffolds a new single-DLL plugin (csproj + `IPlugin` +
-  manifest entry + 3-way version sync); `/caveman` = terse mode.
+  `plugin-versioning.md` = the two version tiers (repo `releaseVersion` vs per-plugin `version`);
+  `sensitive-info.md` = PUBLIC-repo safety; `scripts-live-in-repo.md` = tooling in `devtools/`, private
+  scratch/models in git-ignored `local/`.
+- **Skills** → `/plugin-new <Name> [capability]` scaffolds a new single-DLL plugin; `/plugin-bump <id>`
+  bumps a plugin's version (3-way sync); `/caveman` = terse mode.
 
 ## Git
 

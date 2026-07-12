@@ -1,0 +1,5 @@
+#!/bin/sh
+# Plugin version guard (pre-commit). WARNS — never blocks — when a plugin's files are staged but its
+# `version` wasn't bumped. Enable once with:  node devtools/dev.mjs hooks install
+# See .claude/rules/plugin-versioning.md. The REPO releaseVersion is separate (bumped by release CI).
+node "$(git rev-parse --show-toplevel)/devtools/hooks/version-guard.mjs" || true

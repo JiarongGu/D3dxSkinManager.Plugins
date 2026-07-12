@@ -8,6 +8,7 @@ rules) + `lib/README.md` (full guide) — this index holds the cross-cutting rep
 |---|---|---|
 | [sensitive-info.md](sensitive-info.md) | Writing ANY tracked file / commit message / rewriting history — could embed a real absolute path, Windows username, private-project name, host/LAN IP, or NSFW imagery | PUBLIC repo — never commit machine paths / private names / real IPs / explicit imagery; private context → git-ignored `local/`; a committed leak is a HISTORY problem (filter-repo). Cross-project standard (twin in the app repo) |
 | [scripts-live-in-repo.md](scripts-live-in-repo.md) | Writing a helper / probe / test-fixture script; tempted to use OS temp | Dev tooling lives in `devtools/` (never `%TEMP%`); models/secrets/scratch → git-ignored `local/`; keep the dev loop prompt-free (allow-list `node devtools/dev.mjs`) |
+| [plugin-versioning.md](plugin-versioning.md) | Bumping a version, cutting a release, "which version", the release workflow / tag, the pre-commit version guard | TWO tiers: repo `releaseVersion` (release workflow bumps + tags `vX.Y`) vs per-plugin `version` (dev bumps via `dev.mjs bump <id>`, 3-way sync, pre-commit guard). Don't conflate; don't hand-edit `releaseVersion` |
 
 ## Invariants
 - One rule file = one concern. Keep this index one-line-per-rule (pointer, not the rule body).
