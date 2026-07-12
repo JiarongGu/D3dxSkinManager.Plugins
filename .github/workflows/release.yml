@@ -15,6 +15,11 @@ on:
 permissions:
   contents: write
 
+# Serialize releases per ref so two tag pushes can't race on the carry-forward / latest-release logic.
+concurrency:
+  group: plugins-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: windows-latest
