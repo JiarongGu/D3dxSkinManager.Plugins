@@ -120,15 +120,18 @@ Implement a capability interface (extends `IPlugin`) and the host discovers you 
 ```csharp
 public interface IImageReviewPlugin : IPlugin
 {
-    // 0..1 sensitivity confidence (1 = certainly explicit), or NULL to ABSTAIN (host verdict stands).
-    // Called CONCURRENTLY — be thread-safe.
-    Task<double?> ReviewImageAsync(ImageReviewContext context, CancellationToken ct = default);
+    // VERDICT (contract v2): true = sensitive (veil), false = safe, or NULL to ABSTAIN (host verdict
+    // stands). The PLUGIN owns its own threshold — the host holds no cutoff. Called CONCURRENTLY — be
+    // thread-safe.
+    Task<bool?> ReviewImageAsync(ImageReviewContext context, CancellationToken ct = default);
 }
 ```
 
 `ImageReviewContext(Path, CurrentVerdict, FocusRegions)` — `FocusRegions` are fractional `ImageRegion`s
-(0–1 of width/height, decode-independent) the host's own analysis flagged for closer inspection. Return the
-strongest confidence; abstain (`null`) on unreadable/unsupported input.
+(0–1 of width/height, decode-independent) the host's own analysis flagged for closer inspection. Apply
+your OWN threshold and return a bool verdict; abstain (`null`) on unreadable/unsupported input. Improve a
+detector by retraining/re-sweeping the plugin (the host has no knob) — set the manifest
+`sdkContractVersion` to the `PluginSdk.ContractVersion` you built against (2.x for this contract).
 
 > More capability interfaces (e.g. mod-modification hooks) are planned — they live in `Core` so both host
 > and plugins share them.

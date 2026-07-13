@@ -30,8 +30,9 @@ Full contract: **`lib/README.md`**. Reference implementation: **`D3dxSkinManager
    - `Id = "d3dx.<kebab-name>"`, `Name`, `Version` (SYNC), `Description`, `Author`.
    - `InitAsync(IPluginContext ctx)` — extract embedded natives/models to `ctx.GetPluginDataPath(Id)`;
      on a missing/unloadable native FAIL LOUD (throw + `ctx.Log`), then ABSTAIN — never crash the host per call.
-   - `ImageReview` capability → implement `IImageReviewPlugin.ReviewImageAsync`: return the strongest
-     verdict, or `null` to abstain (host keeps its own verdict).
+   - `ImageReview` capability → implement `IImageReviewPlugin.ReviewImageAsync`: apply your OWN
+     threshold and return a bool VERDICT (`true`=sensitive / `false`=safe), or `null` to abstain (host
+     keeps its own verdict). Contract v2 — the plugin owns the cutoff; the host has no threshold knob.
    - Long work → `ctx.ReportProgress(title)` (host owns the status-bar/Activity entry).
 
 3. **Manifest** — add an entry to `plugins.manifest.json` `plugins[]`:

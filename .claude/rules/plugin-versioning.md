@@ -24,6 +24,11 @@ hook only *reminds* you.
 - **Changed a plugin?** `node devtools/dev.mjs bump <id> [major|minor]` (default minor) — updates all 3
   places atomically. Install the guard once (`node devtools/dev.mjs hooks install`): the pre-commit hook
   then WARNS (never blocks) if you staged a plugin's files without bumping its version.
+- **Refreshed the SDK reference (`lib/`, via `plugin-sdk` in the app repo — rule 5)?** A shared-reference
+  change invalidates EVERY built pack — each must REBUILD against the new contract, and the release build
+  only rebuilds a pack whose `version` changed. So bump each plugin (`bump <id>`) whenever `lib/` moves.
+  The pre-commit guard also WARNS on a staged `lib/` change with no bump (the same reminder as a per-plugin
+  change — it can't pick major/minor for you).
 - **Cutting a release?** Actions → **Release plugins** → Run workflow (pick `bump`, or an explicit
   `version`) → bumps `releaseVersion`, commits, tags `vX.Y`, builds/carries packs, publishes. Or push a
   `vX.Y` tag directly (that path skips the bump — the tag IS the release version).

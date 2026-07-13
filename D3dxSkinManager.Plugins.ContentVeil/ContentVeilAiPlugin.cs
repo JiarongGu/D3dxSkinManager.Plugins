@@ -41,7 +41,7 @@ public sealed class ContentVeilAiPlugin : IImageReviewPlugin
 
     public string Id => "d3dx.content-veil-ai";
     public string Name => "Content Veil AI Detection";
-    public string Version => "1.1";
+    public string Version => "2.0";
     public string Description => "Anime censor-point detector (ONNX) for the content veil";
     public string Author => "D3dxSkinManager";
 
@@ -84,11 +84,20 @@ public sealed class ContentVeilAiPlugin : IImageReviewPlugin
     private const double RegionPassBandHigh = 0.60;
     private const int MaxRegionPasses = 3;
 
-    /// <summary>Sensitivity confidence = the detector's max explicit-part class confidence over
-    /// the full image and (when ambiguous) the host's focus regions. Decodes the file ONCE (capped)
-    /// and crops regions IN-MEMORY — region passes used to re-decode full-res per region, the main
-    /// cost. 1280px keeps enough detail for the 640 detector even after a region crop.</summary>
-    public async Task<double?> ReviewImageAsync(ImageReviewContext context, CancellationToken cancellationToken = default)
+    /// <summary>The detector confidence at/above which an image is SENSITIVE. This plugin OWNS this
+    /// cutoff (contract v2 — the host holds no threshold): a detector is improved by retraining or
+    /// re-sweeping HERE, not by tuning the app. 0.40 = recall-first on the 90-image labeled corpus
+    /// (2026-07-13): nano → recall 95.7% / neg 86%. The corpus overlaps (an undetectable positive +
+    /// suggestive-safe negatives) so recall 95+ / neg 90+ jointly needs corpus work, not a new cutoff.</summary>
+    private const double SensitivityThreshold = 0.40;
+
+    /// <summary>VERDICT (contract v2) = the detector's max explicit-part class confidence over the
+    /// full image and (when ambiguous) the host's focus regions, thresholded by
+    /// <see cref="SensitivityThreshold"/> — this plugin OWNS its cutoff (the host holds none). Decodes
+    /// the file ONCE (capped) and crops regions IN-MEMORY — region passes used to re-decode full-res per
+    /// region, the main cost. 1280px keeps enough detail for the 640 detector even after a region crop.
+    /// Returns null (abstain) when the native runtime is unavailable or the file can't be read.</summary>
+    public async Task<bool?> ReviewImageAsync(ImageReviewContext context, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -123,7 +132,7 @@ public sealed class ContentVeilAiPlugin : IImageReviewPlugin
                         if (best >= RegionPassBandHigh) break; // decisive — stop paying for more passes
                     }
                 }
-                return (double?)best;
+                return (bool?)(best >= SensitivityThreshold); // plugin owns the cutoff → return a VERDICT
             }, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
